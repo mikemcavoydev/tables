@@ -1,10 +1,16 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"log"
 	"net/http"
 )
+
+//go:embed static/*
+var static embed.FS
 
 type Table struct {
 	ID      int64        `json:"id"`
@@ -29,14 +35,15 @@ func main() {
 
 	router := http.NewServeMux()
 
+	router.Handle("/", http.FileServer(http.FS(getStaticFS())))
+
 	router.HandleFunc("GET /api/tables/{id}", func(w http.ResponseWriter, r *http.Request) {
 		table := &Table{
 			ID:    1,
 			Title: "Games Completion List",
 			Entries: []TableEntry{
 				{
-					ID:    1,
-					Title: "The Legend of Zelda Links Awakening",
+					ID: 1,
 					Tags: []Tag{
 						{
 							ID:          1,
@@ -58,4 +65,18 @@ func main() {
 	}
 
 	server.ListenAndServe()
+}
+
+func getStaticFS() fs.FS {
+	_, err := fs.Stat(static, "static")
+	if err != nil {
+		log.Fatalf("ERROR: could not read static directory: %v", err)
+	}
+
+	files, err := fs.Sub(static, "static")
+	if err != nil {
+		log.Fatal("ERROR: invalid path provided")
+	}
+
+	return files
 }

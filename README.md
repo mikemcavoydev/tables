@@ -9,12 +9,12 @@ A little playground for experimenting with various technologies
 - Context for state management
 
 ## todo
-- [ ] Go server structure.
+- [x] Go server structure.
 - [x] React frontend structure with vite.
-- [ ] Serve frontend assets.
-- [ ] Basic endpoint, callable by frontend.
+- [x] Serve frontend assets.
+- [x] Basic endpoint, callable by frontend.
 - [ ] Initialise DB
-- [ ] table endpoint
+- [ ] table endpoint with real data
 - [ ] Render table data on frontend
 - [ ] Sortable table headings
 - [ ] Pagination
