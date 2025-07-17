@@ -1,12 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+
+	_ "github.com/lib/pq"
 )
 
 //go:embed static/*
@@ -32,6 +35,8 @@ type Tag struct {
 
 func main() {
 	fmt.Println("starting server...")
+
+	dbInit()
 
 	router := http.NewServeMux()
 
@@ -79,4 +84,18 @@ func getStaticFS() fs.FS {
 	}
 
 	return files
+}
+
+func dbInit() {
+	connStr := "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatalf("ERROR: could not connect to db: %v", err)
+	}
+	defer db.Close()
+
+	if err = db.Ping(); err != nil {
+		log.Fatalf("ERROR: db healthcheck failed: %v", err)
+	}
 }
