@@ -1,0 +1,19 @@
+curl -X POST http://localhost:8080/api/tables \
+    -H "Content-Type: application/json" \
+    -d '{
+        "title": "Test table"
+    }'
+
+curl -X POST http://localhost:8080/api/tags \
+    -H "Content-Type: application/json" \
+    -d '{
+        "title": "Tag 1",
+        "description": "A test tag"
+    }'
+
+curl -X POST http://localhost:8080/api/tables/1 \
+    -H "Content-Type: application/json" \
+    -d '{
+        "title": "entry number one",
+        "tags": [1]
+    }'
