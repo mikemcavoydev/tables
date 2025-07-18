@@ -13,7 +13,7 @@ A little playground for experimenting with various technologies
 - [x] React frontend structure with vite.
 - [x] Serve frontend assets.
 - [x] Basic endpoint, callable by frontend.
-- [ ] Initialise DB
+- [x] Initialise DB with migrations
 - [ ] table endpoint with real data
 - [ ] Render table data on frontend
 - [ ] Sortable table headings
