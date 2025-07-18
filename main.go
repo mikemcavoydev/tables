@@ -10,18 +10,20 @@ import (
 	"net/http"
 
 	_ "github.com/lib/pq"
+	"github.com/mikemcavoydev/tables/migrations"
+	"github.com/pressly/goose/v3"
 )
 
 //go:embed static/*
 var static embed.FS
 
-type Table struct {
-	ID      int64        `json:"id"`
-	Title   string       `json:"title"`
-	Entries []TableEntry `json:"entries"`
+type Items struct {
+	ID      int64   `json:"id"`
+	Title   string  `json:"title"`
+	Entries []Entry `json:"entries"`
 }
 
-type TableEntry struct {
+type Entry struct {
 	ID    int64  `json:"id"`
 	Title string `json:"title"`
 	Tags  []Tag  `json:"tags"`
@@ -43,10 +45,10 @@ func main() {
 	router.Handle("/", http.FileServer(http.FS(getStaticFS())))
 
 	router.HandleFunc("GET /api/tables/{id}", func(w http.ResponseWriter, r *http.Request) {
-		table := &Table{
+		table := &Items{
 			ID:    1,
 			Title: "Games Completion List",
-			Entries: []TableEntry{
+			Entries: []Entry{
 				{
 					ID: 1,
 					Tags: []Tag{
@@ -98,4 +100,28 @@ func dbInit() {
 	if err = db.Ping(); err != nil {
 		log.Fatalf("ERROR: db healthcheck failed: %v", err)
 	}
+
+	err = applyMigrations(db)
+	if err != nil {
+		log.Fatalf("ERROR: migrations were not applied successfully: %v", err)
+	}
+}
+
+func applyMigrations(db *sql.DB) error {
+	goose.SetBaseFS(migrations.FS)
+	defer func() {
+		goose.SetBaseFS(nil)
+	}()
+
+	err := goose.SetDialect("postgres")
+	if err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+
+	err = goose.Up(db, ".")
+	if err != nil {
+		return fmt.Errorf("goose up: %w", err)
+	}
+
+	return nil
 }
