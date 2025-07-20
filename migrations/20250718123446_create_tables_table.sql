@@ -1,13 +1,12 @@
 -- +goose Up
 -- +goose StatementBegin
-CREATE TABLE entries(
+CREATE TABLE tables(
     id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    item_id INT NOT NUll REFERENCES items(id) ON DELETE CASCADE
+    title VARCHAR(255) NOT NULL
 );
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TABLE entries;
+DROP TABLE tables;
 -- +goose StatementEnd

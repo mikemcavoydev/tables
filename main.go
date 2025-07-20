@@ -18,13 +18,13 @@ import (
 //go:embed static/*
 var static embed.FS
 
-type Items struct {
-	ID      int     `json:"id"`
-	Title   string  `json:"title"`
-	Entries []Entry `json:"entries"`
+type Table struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+	Items []Item `json:"entries"`
 }
 
-type Entry struct {
+type Item struct {
 	ID    int    `json:"id"`
 	Title string `json:"title"`
 	Tags  []Tag  `json:"tags"`
@@ -58,16 +58,16 @@ func main() {
 			return
 		}
 
-		query := `INSERT INTO items (title) VALUES ($1) RETURNING id`
+		query := `INSERT INTO tables (title) VALUES ($1) RETURNING id`
 		var id int
 		err = db.QueryRow(query, dto.Title).Scan(&id)
 		if err != nil {
-			log.Printf("ERROR: failed to insert new items: %v", err)
+			log.Printf("ERROR: failed to insert new table: %v", err)
 			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
 			return
 		}
 
-		WriteJSON(w, http.StatusCreated, Envelope{"data": Items{
+		WriteJSON(w, http.StatusCreated, Envelope{"data": Table{
 			ID:    id,
 			Title: dto.Title,
 		}})
@@ -112,7 +112,6 @@ func main() {
 
 		var dto struct {
 			Title string `json:"title"`
-			Tags  []int  `json:"tags"`
 		}
 
 		err = json.NewDecoder(r.Body).Decode(&dto)
@@ -122,39 +121,60 @@ func main() {
 			return
 		}
 
-		query := `INSERT INTO entries (title, item_id) VALUES ($1, $2) RETURNING id`
-		var entry_id int
-		err = db.QueryRow(query, dto.Title, tableId).Scan(&entry_id)
+		query := `INSERT INTO items (title, table_id) VALUES ($1, $2) RETURNING id`
+		var item_id int
+		err = db.QueryRow(query, dto.Title, tableId).Scan(&item_id)
 		if err != nil {
-			log.Printf("ERROR: failed to insert new items: %v", err)
+			log.Printf("ERROR: failed to insert new item: %v", err)
 			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
 			return
 		}
 
-		var tags []Tag
-		for _, tag_id := range dto.Tags {
-			query := `INSERT INTO entry_tags (tag_id, entry_id) VALUES ($1, $2)`
-			_, err = db.Exec(query, tag_id, entry_id)
+		WriteJSON(w, http.StatusCreated, Envelope{"data": Item{
+			ID:    item_id,
+			Title: dto.Title,
+		}})
+	})
+
+	router.HandleFunc("GET /api/tables", func(w http.ResponseWriter, r *http.Request) {
+
+		var tables []Table
+		query := `SELECT id, title FROM tables`
+		tableRows, err := db.Query(query)
+		if err != nil {
+			log.Printf("ERROR: failed to retrieve tables: %v", err)
+			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
+			return
+		}
+		defer tableRows.Close()
+
+		for tableRows.Next() {
+			var table Table
+			tableRows.Scan(&table.ID, &table.Title)
+
+			query := `SELECT i.id, i.title FROM items i
+			INNER JOIN tables t ON i.table_id = t.id
+			WHERE t.id = 1;`
+
+			itemRows, err := db.Query(query)
 			if err != nil {
-				log.Printf("ERROR: failed to insert new entry tags: %v", err)
+				log.Printf("ERROR: failed to retrieve items: %v", err)
 				WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
 				return
+			}
+			defer itemRows.Close()
+
+			for itemRows.Next() {
+				var item Item
+				itemRows.Scan(&item.ID, &item.Title)
+
+				table.Items = append(table.Items, item)
 			}
 
-			query = `SELECT (id, title, description) FROM tags WHERE id = $1`
-			err = db.QueryRow(query, tag_id).Scan(&entry_id)
-			if err != nil {
-				log.Printf("ERROR: failed to retrieve tags: %v", err)
-				WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
-				return
-			}
+			tables = append(tables, table)
 		}
 
-		WriteJSON(w, http.StatusCreated, Envelope{"data": Entry{
-			ID:    entry_id,
-			Title: dto.Title,
-			Tags:  tags,
-		}})
+		WriteJSON(w, http.StatusCreated, Envelope{"data": tables})
 	})
 
 	server := http.Server{

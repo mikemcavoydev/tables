@@ -2,7 +2,8 @@
 -- +goose StatementBegin
 CREATE TABLE items(
     id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL
+    title VARCHAR(255) NOT NULL,
+    table_id INT NOT NUll REFERENCES tables(id) ON DELETE CASCADE
 );
 -- +goose StatementEnd
 
