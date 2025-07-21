@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 
 	_ "github.com/lib/pq"
@@ -138,8 +140,28 @@ func main() {
 
 	router.HandleFunc("GET /api/tables", func(w http.ResponseWriter, r *http.Request) {
 
-		var tables []Table
-		query := `SELECT id, title FROM tables`
+		tags := make(map[int][]Tag)
+		query := `SELECT tags.id, tags.title, tags.description, item_id from tags
+		INNER JOIN item_tags ON tag_id = tags.id;`
+
+		itemTagsRows, err := db.Query(query)
+		if err != nil {
+			log.Printf("ERROR: failed to retrieve item tags: %v", err)
+			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
+			return
+		}
+		defer itemTagsRows.Close()
+
+		for itemTagsRows.Next() {
+			var tag Tag
+			var item_id int
+			itemTagsRows.Scan(&tag.ID, &tag.Title, &tag.Description, &item_id)
+
+			tags[item_id] = append(tags[item_id], tag)
+		}
+
+		query = `select t.id, t.title, i.id, i.title FROM tables t
+		LEFT JOIN items i ON i.table_id = t.id;`
 		tableRows, err := db.Query(query)
 		if err != nil {
 			log.Printf("ERROR: failed to retrieve tables: %v", err)
@@ -148,31 +170,27 @@ func main() {
 		}
 		defer tableRows.Close()
 
+		tableMap := make(map[int]Table)
 		for tableRows.Next() {
 			var table Table
-			tableRows.Scan(&table.ID, &table.Title)
+			var item Item
+			tableRows.Scan(&table.ID, &table.Title, &item.ID, &item.Title)
 
-			query := `SELECT i.id, i.title FROM items i
-			INNER JOIN tables t ON i.table_id = t.id
-			WHERE t.id = 1;`
-
-			itemRows, err := db.Query(query)
-			if err != nil {
-				log.Printf("ERROR: failed to retrieve items: %v", err)
-				WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
-				return
-			}
-			defer itemRows.Close()
-
-			for itemRows.Next() {
-				var item Item
-				itemRows.Scan(&item.ID, &item.Title)
-
-				table.Items = append(table.Items, item)
+			if itemTags, ok := tags[item.ID]; ok {
+				item.Tags = itemTags
 			}
 
-			tables = append(tables, table)
+			if existing, ok := tableMap[table.ID]; ok {
+				existing.Items = append(existing.Items, item)
+				tableMap[table.ID] = existing
+			} else {
+				table.Items = []Item{item}
+				tableMap[table.ID] = table
+			}
+
 		}
+
+		tables := slices.Collect(maps.Values(tableMap))
 
 		WriteJSON(w, http.StatusCreated, Envelope{"data": tables})
 	})
