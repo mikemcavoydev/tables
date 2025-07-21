@@ -10,7 +10,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"strconv"
 
 	_ "github.com/lib/pq"
 	"github.com/mikemcavoydev/tables/migrations"
@@ -23,7 +22,7 @@ var static embed.FS
 type Table struct {
 	ID    int    `json:"id"`
 	Title string `json:"title"`
-	Items []Item `json:"entries"`
+	Items []Item `json:"items"`
 }
 
 type Item struct {
@@ -48,156 +47,15 @@ func main() {
 
 	router.Handle("/", http.FileServer(http.FS(getStaticFS())))
 
-	router.HandleFunc("POST /api/tables", func(w http.ResponseWriter, r *http.Request) {
-		var dto struct {
-			Title string `json:"title"`
-		}
+	router.Handle("POST /api/tables", createTable(db))
 
-		err := json.NewDecoder(r.Body).Decode(&dto)
-		if err != nil {
-			log.Printf("ERROR: invalid payload: %v", err)
-			WriteJSON(w, http.StatusBadRequest, Envelope{"error": "bad request"})
-			return
-		}
+	router.Handle("POST /api/tags", createTag(db))
 
-		query := `INSERT INTO tables (title) VALUES ($1) RETURNING id`
-		var id int
-		err = db.QueryRow(query, dto.Title).Scan(&id)
-		if err != nil {
-			log.Printf("ERROR: failed to insert new table: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
-			return
-		}
-
-		WriteJSON(w, http.StatusCreated, Envelope{"data": Table{
-			ID:    id,
-			Title: dto.Title,
-		}})
-	})
-
-	router.HandleFunc("POST /api/tags", func(w http.ResponseWriter, r *http.Request) {
-		var dto struct {
-			Title       string `json:"title"`
-			Description string `json:"description"`
-		}
-
-		err := json.NewDecoder(r.Body).Decode(&dto)
-		if err != nil {
-			log.Printf("ERROR: invalid payload: %v", err)
-			WriteJSON(w, http.StatusBadRequest, Envelope{"error": "bad request"})
-			return
-		}
-
-		query := `INSERT INTO tags (title, description) VALUES ($1, $2) RETURNING id`
-		var id int
-		err = db.QueryRow(query, dto.Title, dto.Description).Scan(&id)
-		if err != nil {
-			log.Printf("ERROR: failed to insert new tag: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
-			return
-		}
-
-		WriteJSON(w, http.StatusCreated, Envelope{"data": Tag{
-			ID:          id,
-			Title:       dto.Title,
-			Description: dto.Description,
-		}})
-	})
-
-	router.HandleFunc("POST /api/tables/{id}", func(w http.ResponseWriter, r *http.Request) {
-		tableId, err := strconv.ParseInt(r.PathValue("id"), 0, 64)
-		if err != nil {
-			log.Printf("ERROR: invalid id: %v", err)
-			WriteJSON(w, http.StatusBadRequest, Envelope{"error": "bad request"})
-			return
-		}
-
-		var dto struct {
-			Title string `json:"title"`
-		}
-
-		err = json.NewDecoder(r.Body).Decode(&dto)
-		if err != nil {
-			log.Printf("ERROR: invalid payload: %v", err)
-			WriteJSON(w, http.StatusBadRequest, Envelope{"error": "bad request"})
-			return
-		}
-
-		query := `INSERT INTO items (title, table_id) VALUES ($1, $2) RETURNING id`
-		var item_id int
-		err = db.QueryRow(query, dto.Title, tableId).Scan(&item_id)
-		if err != nil {
-			log.Printf("ERROR: failed to insert new item: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
-			return
-		}
-
-		WriteJSON(w, http.StatusCreated, Envelope{"data": Item{
-			ID:    item_id,
-			Title: dto.Title,
-		}})
-	})
-
-	router.HandleFunc("GET /api/tables", func(w http.ResponseWriter, r *http.Request) {
-
-		tags := make(map[int][]Tag)
-		query := `SELECT tags.id, tags.title, tags.description, item_id from tags
-		INNER JOIN item_tags ON tag_id = tags.id;`
-
-		itemTagsRows, err := db.Query(query)
-		if err != nil {
-			log.Printf("ERROR: failed to retrieve item tags: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
-			return
-		}
-		defer itemTagsRows.Close()
-
-		for itemTagsRows.Next() {
-			var tag Tag
-			var item_id int
-			itemTagsRows.Scan(&tag.ID, &tag.Title, &tag.Description, &item_id)
-
-			tags[item_id] = append(tags[item_id], tag)
-		}
-
-		query = `select t.id, t.title, i.id, i.title FROM tables t
-		LEFT JOIN items i ON i.table_id = t.id;`
-		tableRows, err := db.Query(query)
-		if err != nil {
-			log.Printf("ERROR: failed to retrieve tables: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
-			return
-		}
-		defer tableRows.Close()
-
-		tableMap := make(map[int]Table)
-		for tableRows.Next() {
-			var table Table
-			var item Item
-			tableRows.Scan(&table.ID, &table.Title, &item.ID, &item.Title)
-
-			if itemTags, ok := tags[item.ID]; ok {
-				item.Tags = itemTags
-			}
-
-			if existing, ok := tableMap[table.ID]; ok {
-				existing.Items = append(existing.Items, item)
-				tableMap[table.ID] = existing
-			} else {
-				table.Items = []Item{item}
-				tableMap[table.ID] = table
-			}
-
-		}
-
-		tables := slices.Collect(maps.Values(tableMap))
-
-		WriteJSON(w, http.StatusCreated, Envelope{"data": tables})
-	})
+	router.Handle("GET /api/tables", allTables(db))
 
 	server := http.Server{
 		Addr:    ":8080",
-		Handler: router,
+		Handler: corsMiddleware(router),
 	}
 
 	server.ListenAndServe()
@@ -269,4 +127,130 @@ func WriteJSON(w http.ResponseWriter, status int, data Envelope) error {
 	w.WriteHeader(status)
 	w.Write(js)
 	return nil
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func createTable(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var dto struct {
+			Title string `json:"title"`
+		}
+
+		err := json.NewDecoder(r.Body).Decode(&dto)
+		if err != nil {
+			log.Printf("ERROR: invalid payload: %v", err)
+			WriteJSON(w, http.StatusBadRequest, Envelope{"error": "bad request"})
+			return
+		}
+
+		query := `INSERT INTO tables (title) VALUES ($1) RETURNING id`
+		var id int
+		err = db.QueryRow(query, dto.Title).Scan(&id)
+		if err != nil {
+			log.Printf("ERROR: failed to insert new table: %v", err)
+			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
+			return
+		}
+
+		WriteJSON(w, http.StatusCreated, Envelope{"data": Table{
+			ID:    id,
+			Title: dto.Title,
+		}})
+	}
+}
+
+func createTag(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var dto struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+		}
+
+		err := json.NewDecoder(r.Body).Decode(&dto)
+		if err != nil {
+			log.Printf("ERROR: invalid payload: %v", err)
+			WriteJSON(w, http.StatusBadRequest, Envelope{"error": "bad request"})
+			return
+		}
+
+		query := `INSERT INTO tags (title, description) VALUES ($1, $2) RETURNING id`
+		var id int
+		err = db.QueryRow(query, dto.Title, dto.Description).Scan(&id)
+		if err != nil {
+			log.Printf("ERROR: failed to insert new tag: %v", err)
+			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
+			return
+		}
+
+		WriteJSON(w, http.StatusCreated, Envelope{"data": Tag{
+			ID:          id,
+			Title:       dto.Title,
+			Description: dto.Description,
+		}})
+	}
+}
+
+func allTables(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		tags := make(map[int][]Tag)
+		query := `SELECT tags.id, tags.title, tags.description, item_id from tags
+		INNER JOIN item_tags ON tag_id = tags.id;`
+
+		itemTagsRows, err := db.Query(query)
+		if err != nil {
+			log.Printf("ERROR: failed to retrieve item tags: %v", err)
+			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
+			return
+		}
+		defer itemTagsRows.Close()
+
+		for itemTagsRows.Next() {
+			var tag Tag
+			var item_id int
+			itemTagsRows.Scan(&tag.ID, &tag.Title, &tag.Description, &item_id)
+
+			tags[item_id] = append(tags[item_id], tag)
+		}
+
+		query = `select t.id, t.title, i.id, i.title FROM tables t
+		LEFT JOIN items i ON i.table_id = t.id;`
+		tableRows, err := db.Query(query)
+		if err != nil {
+			log.Printf("ERROR: failed to retrieve tables: %v", err)
+			WriteJSON(w, http.StatusInternalServerError, Envelope{"error": "something went wrong"})
+			return
+		}
+		defer tableRows.Close()
+
+		tableMap := make(map[int]Table)
+		for tableRows.Next() {
+			var table Table
+			var item Item
+			tableRows.Scan(&table.ID, &table.Title, &item.ID, &item.Title)
+
+			if itemTags, ok := tags[item.ID]; ok {
+				item.Tags = itemTags
+			}
+
+			if existing, ok := tableMap[table.ID]; ok {
+				existing.Items = append(existing.Items, item)
+				tableMap[table.ID] = existing
+			} else {
+				table.Items = []Item{item}
+				tableMap[table.ID] = table
+			}
+
+		}
+
+		tables := slices.Collect(maps.Values(tableMap))
+
+		WriteJSON(w, http.StatusCreated, Envelope{"data": tables})
+	}
 }
