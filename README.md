@@ -15,6 +15,6 @@ A little playground for experimenting with various technologies
 - [x] Basic endpoint, callable by frontend.
 - [x] Initialise DB with migrations
 - [x] table endpoint with real data
-- [ ] Render table data on frontend
+- [x] Render table data on frontend
 - [ ] Sortable table headings
 - [ ] Pagination
